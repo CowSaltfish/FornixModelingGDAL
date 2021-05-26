@@ -17,6 +17,7 @@ namespace FornixModelingGDAL
         public InSide inSide { get; private set; }
         public double dip { get; set; }
         public double[] range { get; private set; }
+        public int Bessel_num_collected;//贝塞尔采集点数
 
         public Fornix()
         {
@@ -39,28 +40,138 @@ namespace FornixModelingGDAL
             range = new double[4];
         }
 
-        //地层存入侧面上顶点
+        /// <summary>
+        /// 地层存入侧面上顶点
+        /// </summary>
+        /// <param name="vc"></param>
         public void createOutSideUpvers(VertexCollection vc)
         {
             this.outSide.addUpvers(vc);
         }
-        //地层存入侧面下顶点
+        /// <summary>
+        /// 地层存入侧面下顶点
+        /// </summary>
+        /// <param name="vc"></param>
         public void createOutSideLowvers(VertexCollection vc)
         {
             this.outSide.addLowvers(vc);
         }
         /// <summary>
+        /// 地层存入侧面下顶点
+        /// </summary>
+        public void createOutSideLowversFromSide()
+        {
+            for (int i = 0; i < this.outSide.sidelines.Count; ++i)
+            {
+                this.outSide.lowvers.addVer(this.outSide.sidelines[i].getVer(this.outSide.sidelines[i].Count - 1));
+            }
+        }
+
+        /// <summary>
         /// 根据产状和贝塞尔系数生成几圈侧边点
         /// </summary>
         /// <param name="downElevation">底面海拔</param>
-        /// <param name="Bessel_num_control">贝塞尔控制点点数</param>
         /// <param name="Bessel_rad_cof">贝塞尔弧度系数</param>
-        public void createOutSideCircles(double downElevation, int Bessel_num_control, double Bessel_rad_cof)
+        /// <param name="Bessel_num_control">贝塞尔控制点点数</param>
+        /// <param name="Bessel_num_collected">贝塞尔采集点点数</param>
+        public int createOutSideCircles(double downElevation, double Bessel_rad_cof, int Bessel_num_control, int Bessel_num_collected)
         {
             //由边界点及其产状生成侧边线控制点集合（边界点、中程控制点、底边点）
-
+            createSidelinesControl(downElevation, Bessel_rad_cof, Bessel_num_control);
             //由侧边控制点生成Bessel_num_control + 1圈侧面顶点（边界点、贝塞尔曲线采集点、底边点），维持侧面顶点“位于同一侧边线”的关系
-            
+            return createSidelines(downElevation, Bessel_num_control, Bessel_num_collected);
+        }
+        
+        /// <summary>
+        /// 由边界点及其产状生成侧边线控制点集合（边界点、中程控制点、底边点）
+        /// </summary>
+        /// <param name="downElevation"></param>
+        /// <param name="Bessel_rad_cof"></param>
+        /// <param name="Bessel_num_control"></param>
+        void createSidelinesControl(double downElevation, double Bessel_rad_cof, int Bessel_num_control)
+        {
+            Vertex vertexUpper, vertexLower;
+            for (int i = 0; i < this.outSide.countUpVers(); ++i)
+            {
+                Sideline slc = new Sideline();//侧边控制点
+                slc.addVer(this.outSide.getUpver(i));
+                for (int j = 1; j < Bessel_num_control; ++j)
+                {
+                    vertexUpper = slc.getVer(j - 1);
+                    vertexLower = new Vertex();
+                    vertexLower.createControlVer(vertexUpper, downElevation, Bessel_rad_cof, Bessel_num_control);
+                    slc.addVer(vertexLower);
+                }
+                this.outSide.sidelines_control.Add(slc);
+            }
+        }
+
+        /// <summary>
+        /// 由侧边控制点生成侧面顶点
+        /// </summary>
+        /// <param name="downElevation"></param>
+        /// <param name="Bessel_num_control"></param>
+        /// <param name="Bessel_num_collected"></param>
+        /// <returns>总共新生成点的个数</returns>
+        int createSidelines(double downElevation, int Bessel_num_control, int Bessel_num_collected)
+        {
+            Sideline curSLc, sl;
+            for (int i = 0; i < this.outSide.sidelines_control.Count(); ++i)
+            {
+                curSLc = this.outSide.sidelines_control[i];
+                sl = new Sideline();
+                sl.createVerByBessel(curSLc, Bessel_num_collected, this.outSide.upvers.Count);
+                this.outSide.sidelines.Add(sl);
+            }
+            return this.outSide.sidelines_control.Count() * (Bessel_num_collected - 1);
+        }
+
+        /// <summary>
+        /// 地层贝塞尔侧面生成
+        /// </summary>
+        /// <returns></returns>
+        public int createOutSideByBessel(int Bessel_num_collected)
+        {
+            int removeLowVersNum = 0;
+            for (int i = 0; i < Bessel_num_collected - 1; ++i)
+                removeLowVersNum += createOutSide(i);
+            return removeLowVersNum;
+        }
+
+        /// <summary>
+        /// 生成地层第i层侧面
+        /// </summary>
+        public int createOutSide(int sli)
+        {
+            //消除意外圈
+            int removeLowVersNum = 0;
+            removeLowVersNum += removeInsectedFace(sli);
+            //消除狭小缝隙
+            //removeLowVersNum += cancelMutateFace(sli);
+            //侧面生成
+            Triangle tri0, tri1;
+            Vertex curV0, curV1,lowV0,lowV1;
+            for (int i = 0; i < this.outSide.sidelines.Count; ++i)
+            {
+                curV0 = this.outSide.sidelines[i].getVer(sli);
+                curV1 = i != this.outSide.sidelines.Count - 1?this.outSide.sidelines[i + 1].getVer(sli):this.outSide.sidelines[0].getVer(sli);
+                lowV0 = this.outSide.sidelines[i].getVer(sli + 1);
+                lowV1 = i != this.outSide.sidelines.Count - 1 ? this.outSide.sidelines[i + 1].getVer(sli + 1) : this.outSide.sidelines[0].getVer(sli + 1);
+                tri0 = new Triangle();
+                tri1 = new Triangle();
+                tri0.addPoint(curV0);
+                tri0.addPoint(curV1);
+                tri0.addPoint(lowV0);
+                this.outSide.addTri(tri0);
+                if(!lowV1.toRemove)
+                {
+                    tri1.addPoint(curV1);
+                    tri1.addPoint(lowV1);
+                    tri1.addPoint(lowV0);
+                    this.outSide.addTri(tri1);
+                }
+            }
+            return removeLowVersNum;
         }
 
         /// <summary>
@@ -174,15 +285,151 @@ namespace FornixModelingGDAL
             this.outSide.lowvers.addVerCollection(vcDown1);
             return removeLowVersNum;
         }
+
+        /// <summary>
+        /// 通过检查侧边第sli+1层线段有无相交（形成意外圈），来消除相交三角面，转而用其最外交点为顶点
+        /// </summary>
+        /// <param name="sli">侧面层数</param>
+        /// <returns>消除突变面导致底边边界点被移除的数量</returns>
+        private int removeInsectedFace(int sli)
+        {
+            int removeLowVersNum = 0;//移去侧面底边顶点个数
+            int i, j, k = 0, idxEdge;//当前线段与其后第idxEdge个线段最后相交
+            Vertex curV0, curV1, testV0, testV1, crossV0 = null, crossV1 = null;
+            Vertex insertedVer;
+            //VertexCollection vcDown1 = new VertexCollection();
+
+            for (i = 0; i < this.outSide.upvers.Count - 1; ++i)
+            {
+                curV0 = this.outSide.sidelines[i].getVer(sli + 1);
+                curV1 = this.outSide.sidelines[i+1].getVer(sli + 1);
+                idxEdge = -1;
+                //从当前线段后第二个线段开始，到最后一个线段，搜索交点（一个线段的下两个线段才可能与其“相交”，所以从i+2开始）
+                for (j = i + 2; (i > 0 && j < this.outSide.sidelines.Count) || (i == 0 && j < this.outSide.sidelines.Count - 1); ++j)
+                {
+                    testV0 = this.outSide.sidelines[j].getVer(sli + 1);
+                    if (j != this.outSide.sidelines.Count - 1)
+                        testV1 = this.outSide.sidelines[j + 1].getVer(sli + 1);
+                    else
+                        testV1 = this.outSide.sidelines[0].getVer(sli + 1);
+                    if (Tools.InsectionJudge(curV0, curV1, testV0, testV1))
+                    {
+                        crossV0 = testV0;
+                        crossV1 = testV1;
+                        idxEdge = j - i;
+                    }
+                }
+                if (-1 == idxEdge)//说明没相交
+                    continue;
+                //“意外圈”中包含大多数边界点，意味着底边起始点可能处于“意外圈”中，
+                //删除“意外圈”中所有顶点，起始点移至交点处
+                //为防止这种情况，绘制地层边界时，就应当从地层界线外凸弧段部位开始绘制
+                if (idxEdge > this.outSide.upvers.Count * 0.7)
+                {
+                    MessageBox.Show("底边起始点可能处于‘意外圈’中！");
+                }
+                //removeLowVersNum += (idxEdge - 1);//移去idxEdge，又添加1个交点为新边界点
+                //两个线段交点
+                insertedVer = Tools.GetCrossPoint(curV0, curV1, crossV0, crossV1);
+                //insertedVer.ID = this.outSide.getDownver(i).ID + 1;
+                //将i+1到i + idxEdge间的点移动到交点上
+                for (j = i + 1; j <= i + idxEdge; ++j)
+                {
+                    this.outSide.sidelines[j].getVer(sli + 1).X(insertedVer.X());
+                    this.outSide.sidelines[j].getVer(sli + 1).Y(insertedVer.Y());
+                    this.outSide.sidelines[j].getVer(sli + 1).Z(insertedVer.Z());
+                    if (j != i + 1)
+                        this.outSide.sidelines[j].getVer(sli + 1).toRemove = true;
+                }
+
+                ////往新底面顶点集合中插入已确定的顶点
+                //for (j = k; j <= i; ++j)
+                //    vcDown1.addVer(this.outSide.lowvers.getVer(j));
+                ////更改上下顶点对应关系
+                //for (; j <= i + idxEdge; ++j)
+                //    this.outSide.getUpver(j).corIdx = vcDown1.Count - 1;
+                ////当前顶点后的所有顶点ID前移
+                //for (; j < this.outSide.lowvers.Count; ++j)
+                //{
+                //    this.outSide.getUpver(j).corIdx -= idxEdge;
+                //    this.outSide.getDownver(j).ID -= (idxEdge - 1);
+                //}
+                //vcDown1.addVer(insertedVer);
+                k = i + idxEdge + 1;
+                //向后推进到与当前侧面底边线段无交点的第一个线段
+                i += idxEdge;
+            }
+            //插入剩余的顶点
+            //for (j = k; j < i + 1; ++j)
+            //    vcDown1.addVer(this.outSide.lowvers.getVer(j));
+            //更新顶点集合
+            //this.outSide.lowvers.clear();
+            //this.outSide.lowvers.addVerCollection(vcDown1);
+
+            return removeLowVersNum;
+        }
     
         /// <summary>
         /// 解决突变面问题
         /// </summary>
-        /// <param name="tri0"></param>
-        /// <param name="tri1"></param>
-        private void cancelMutateFace(Triangle tri0, Triangle tri1)
+        /// <param name="sli"></param>
+        /// <returns></returns>
+        private int cancelMutateFace(int sli)
         {
+            int removeLowVersNum = 0;//移去侧面底边顶点个数
+            int i, j, k = 0, idxVer;//当前线段与其后第idxEdge个线段最后相交
+            Vertex curV0, curV1, testV, crossV0 = null, crossV1 = null;
+            Vertex insertedVer;
 
+            for (i = 0; i < this.outSide.upvers.Count - 1; ++i)
+            {
+                curV0 = this.outSide.sidelines[i].getVer(sli + 1);
+                curV1 = this.outSide.sidelines[i + 1].getVer(sli + 1);
+                testV = this.outSide.sidelines[i + 2].getVer(sli + 1);
+                idxVer = 2;
+
+                if (15.0 < Math.Acos(curV1.calAngle(curV0, testV))*180.0/Math.PI)
+                    continue;
+
+                //从当前线段后第二个线段开始，到最后一个线段，搜索交点（一个线段的下两个线段才可能与其“相交”，所以从i+2开始）
+                for (j = i + 3; (i > 0 && j < this.outSide.sidelines.Count) || (i == 0 && j < this.outSide.sidelines.Count - 1); ++j)
+                {
+                    testV = this.outSide.sidelines[j].getVer(sli + 1);
+                    ++idxVer;
+                    if (15.0 < Math.Acos(curV1.calAngle(curV0, testV)) * 180.0 / Math.PI)
+                        break;
+                }
+                //若缝合线长度大于curV01的1.5倍则不做处理
+                if (curV1.calDistance(testV) > curV1.calDistance(curV0) * 1.5)
+                    continue;
+
+                if (-1 == idxVer)//说明没相交
+                    continue;
+                //“意外圈”中包含大多数边界点，意味着底边起始点可能处于“意外圈”中，
+                //删除“意外圈”中所有顶点，起始点移至交点处
+                //为防止这种情况，绘制地层边界时，就应当从地层界线外凸弧段部位开始绘制
+                if (idxVer > this.outSide.upvers.Count * 0.7)
+                {
+                    MessageBox.Show("底边起始点可能处于‘意外圈’中！");
+                }
+                //removeLowVersNum += (idxEdge - 1);//移去idxEdge，又添加1个交点为新边界点
+                //两个线段交点
+                insertedVer = Tools.GetCrossPoint(curV0, curV1, crossV0, crossV1);
+                //insertedVer.ID = this.outSide.getDownver(i).ID + 1;
+                //将i+1到i + idxEdge间的点移动到交点上
+                for (j = i + 2; j <= i + idxVer; ++j)
+                {
+                    this.outSide.sidelines[j].getVer(sli + 1).X(insertedVer.X());
+                    this.outSide.sidelines[j].getVer(sli + 1).Y(insertedVer.Y());
+                    this.outSide.sidelines[j].getVer(sli + 1).Z(insertedVer.Z());
+                    if (j != i + 1)
+                        this.outSide.sidelines[j].getVer(sli + 1).toRemove = true;
+                }
+                k = i + idxVer + 1;
+                //向后推进到与当前侧面底边线段无交点的第一个线段
+                i += idxVer;
+            }
+            return removeLowVersNum;
         }
 
         public void createInSide(Fornix foxnix)
@@ -269,14 +516,16 @@ namespace FornixModelingGDAL
         public List<Edge> edges { get; private set; }
         public VertexCollection upvers { get; private set; }
         public VertexCollection lowvers { get; private set; }
-        public List<Sideline> sideline_control_vers;
-        public List<Sideline> sidelines;
+        public List<Sideline> sidelines_control;//侧边线控制点集合
+        public List<Sideline> sidelines;//侧边线顶点集合
         public OutSide()
         {
             this.tris = new SortedList<string, Triangle>();
             this.edges = new List<Edge>();
             this.upvers = new VertexCollection();
             this.lowvers = new VertexCollection();
+            this.sidelines_control = new List<Sideline>();
+            this.sidelines = new List<Sideline>();
         }
         public void addUpvers(VertexCollection upvers)
         {
@@ -640,15 +889,66 @@ namespace FornixModelingGDAL
     /// </summary>
     class Sideline : VertexCollection
     {
-        
+        /// <summary>
+        /// 由控制点生成贝塞尔曲线，得到采集点
+        /// </summary>
+        /// <param name="slc"></param>
+        /// <param name="num"></param>
+        /// <param name="num_upvers">边界点个数</param>
+        public void createVerByBessel(Sideline slc,int num,int num_upvers)
+        {
+            Vertex verBessel;
+            this.addVer(slc.getVer(0));//插入顶边点
+            double t = 0;
+            t += (1.0 / (num - 1.0));
+            int i;
+            for (i = 1; i < num - 1; ++i)
+            {
+                verBessel = calBesselVer(slc, t);
+                if (null != verBessel)
+                {
+                    verBessel.ID = slc.getVer(0).ID + num_upvers * i;
+                    this.addVer(verBessel);
+                }
+                t += (1.0 / (num - 1.0));
+            }
+            slc.getVer(slc.Count - 1).ID = slc.getVer(0).ID + num_upvers * i;
+            this.addVer(slc.getVer(slc.Count - 1));//插入底边点
+        }
+
+        /// <summary>
+        /// 计算贝塞尔曲线采集点坐标
+        /// </summary>
+        /// <param name="slc"></param>
+        /// <param name="t"></param>
+        /// <returns></returns>
+        private Vertex calBesselVer(Sideline slc, double t)
+        {
+            if (3 == slc.Count)//一个中程控制点
+            {
+                Vertex verBessel = new Vertex();
+                verBessel.X(Math.Pow(1.0 - t, 2) * slc.getVer(0).X() + 2 * t * (1 - t) * slc.getVer(1).X() + t * t * slc.getVer(2).X());
+                verBessel.Y(Math.Pow(1.0 - t, 2) * slc.getVer(0).Y() + 2 * t * (1 - t) * slc.getVer(1).Y() + t * t * slc.getVer(2).Y());
+                verBessel.Z(Math.Pow(1.0 - t, 2) * slc.getVer(0).Z() + 2 * t * (1 - t) * slc.getVer(1).Z() + t * t * slc.getVer(2).Z());
+                return verBessel;
+            }
+            else if (4 == slc.Count)//两个中程控制点
+            {
+                //之后再写
+            }
+            else if (4 < slc.Count)
+                MessageBox.Show("暂不考虑高阶贝塞尔曲线");
+            return null;
+        }
     }
+
 
     /// <summary>
     /// 地层等高线交点
     /// </summary>
     class InsectVer : Vertex
     {
-        public int VerIdx { get; set; }//邻接边界点ID
+        public int VerIdx { get; set; }//上邻接边界点ID
     }
 
     class Vertex
@@ -659,8 +959,10 @@ namespace FornixModelingGDAL
         private Coordinate position { get; set; }
         public Occurrence occurrence { get; set; }
         public bool innerPoint { get; set; }//是否是内部点
-        public bool toRemove { get; set; }
+        public bool toRemove { get; set; }//消除自相交或狭小缝隙的时候有没有被移除
         public int type { get; set; }//类型：0-边界点 1-底边边界点 2-等高线折点
+        public double angle{ get; set; }//角度
+        public double curvature { get; set; }//曲率
         public Vertex()
         {
             this.position = new Coordinate();
@@ -731,12 +1033,29 @@ namespace FornixModelingGDAL
             double Xpt = this.X() - prev.X();
             double Ypt = this.Y() - prev.Y();
             double Convexity = this.calVector(prev, nextv);
-            if (0.0 > Xpt * B - Ypt * A)
-            //if ((0.0 < Convexity && 0.0 > Xpt * B - Ypt * A ) || (0.0 > Convexity && 0.0 < Xpt * B - Ypt * A))
-            {
-                this.occurrence.inclination = (this.occurrence.inclination - Math.PI >= 0.0) ?
+            double Angle = Math.Atan(this.calAngle(prev, nextv));
+            double Angle_prev_normal = Math.Atan(((-Xpt) * A + (-Ypt) * B) / (Math.Sqrt(Xpt * Xpt + Ypt * Ypt) + Math.Sqrt(A * A + B * B)));
+            //计算倾向
+            if (0.0 > Convexity)
+                if (0.0 > Xpt * B - Ypt * A && Angle > Angle_prev_normal)
+                    this.occurrence.inclination = (this.occurrence.inclination - Math.PI >= 0.0) ?
                     this.occurrence.inclination - Math.PI : this.occurrence.inclination + Math.PI;
+            else
+            {
+                if (0.0 > Xpt * B - Ypt * A)
+                {
+                    if (Math.PI > Angle_prev_normal+Angle)
+                        //外接圆法
+                        this.calOccuurence(prev, nextv);
+                    else
+                        this.occurrence.inclination = (this.occurrence.inclination - Math.PI >= 0.0) ?
+                    this.occurrence.inclination - Math.PI : this.occurrence.inclination + Math.PI;
+                }
+                else if (Angle_prev_normal > Angle) 
+                    //外接圆法
+                    this.calOccuurence(prev, nextv);
             }
+
             //计算走向
             this.occurrence.trend = (this.occurrence.inclination - Math.PI / 2 >= 0.0) ?
                 this.occurrence.inclination - Math.PI / 2 : this.occurrence.inclination + Math.PI / 2;
@@ -745,11 +1064,6 @@ namespace FornixModelingGDAL
             this.occurrence.dip = Math.Acos(Math.Abs(C) / Math.Sqrt(A * A + B * B + C * C));
             if (double.IsNaN(this.occurrence.dip))
                 Console.WriteLine("");
-            //if (Math.PI / 6 > this.occurrence.dip)
-            //{
-            //    this.occurrence.dip = prev.occurrence.dip;
-            //    this.occurrence.inclination = prev.occurrence.inclination;
-            //}
         }
 
         /// <summary>
@@ -815,15 +1129,48 @@ namespace FornixModelingGDAL
             return this;
         }
 
+        /// <summary>
+        /// 由边界点计算侧边控制点
+        /// </summary>
+        /// <param name="ver"></param>
+        /// <param name="downElevation"></param>
+        /// <param name="Bessel_rad_cof"></param>
+        /// <param name="Bessel_num_control"></param>
+        /// <returns></returns>
+        public Vertex createControlVer(Vertex ver, double downElevation, double Bessel_rad_cof, int Bessel_num_control)
+        {
+            double height = (ver.Z() - downElevation) / (Bessel_num_control - 1);
+            this.X(ver.X() + height * Math.Sin(ver.occurrence.inclination) / Math.Tan(ver.occurrence.dip));
+            this.Y(ver.Y() + height * Math.Cos(ver.occurrence.inclination) / Math.Tan(ver.occurrence.dip));
+            this.Z(ver.Z() + (downElevation - ver.Z()) / (Bessel_num_control - 1));
+            this.occurrence.inclination = ver.occurrence.inclination;
+            this.occurrence.dip = ver.occurrence.dip * Bessel_rad_cof;
+            if (double.IsNaN(this.X()) || double.IsNaN(this.Y()) || double.IsNaN(this.Z()))
+                Console.WriteLine("");
+            return this;
+        }
+
+        /// <summary>
+        /// 计算夹角
+        /// </summary>
+        /// <param name="prev"></param>
+        /// <param name="nextv"></param>
+        /// <returns></returns>
         public double calAngle(Vertex prev, Vertex nextv)
         {
             double x0 = prev.X() - this.X();
             double y0 = prev.Y() - this.Y();
             double x1 = nextv.X() - this.X();
             double y1 = nextv.Y() - this.Y();
-            return (x0 * x1 + y0 * y1) / (Math.Sqrt(x0 * x0 + y0 * y0) + Math.Sqrt(x1 * x1 + y1 * y1));
+            return (x0 * x1 + y0 * y1) / (Math.Sqrt(x0 * x0 + y0 * y0) * Math.Sqrt(x1 * x1 + y1 * y1));
         }
 
+        /// <summary>
+        /// 计算外积
+        /// </summary>
+        /// <param name="prev"></param>
+        /// <param name="nextv"></param>
+        /// <returns></returns>
         public double calVector(Vertex prev, Vertex nextv)
         {
             double x0 = this.X() - prev.X();
@@ -831,6 +1178,18 @@ namespace FornixModelingGDAL
             double x1 = nextv.X() - this.X();
             double y1 = nextv.Y() - this.Y();
             return x0 * y1 - x1 * y0;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="prev"></param>
+        /// <param name="nextv"></param>
+        /// <returns></returns>
+        public double calCurvature(Vertex prev, Vertex nextv)
+        {
+            this.curvature = this.angle / (this.calDistance(prev) + this.calDistance(nextv));
+            return this.curvature;
         }
 
         public double calDistance(Vertex ver)

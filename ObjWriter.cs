@@ -17,22 +17,31 @@ namespace FornixModelingGDAL
         public static void writeFornixObj(List<Fornix> fornixs, string path,int verNum)
         {
             StreamWriter sw = File.CreateText(path);
-            int i;
+            int i, j;
             foreach (Fornix fornix in fornixs)
             {
-                //生成顶面外顶点
-                for (i = 0; i < fornix.outSide.upvers.Count; ++i)
+                ////生成顶面外顶点
+                //for (i = 0; i < fornix.outSide.upvers.Count; ++i)
+                //{
+                //    sw.WriteLine("v " + fornix.outSide.getUpver(i).X().ToString() + " "
+                //        + fornix.outSide.getUpver(i).Y().ToString() + " "
+                //        + fornix.outSide.getUpver(i).Z().ToString() + " ");
+                //}
+                ////生成底面外顶点
+                //for (i = 0; i < fornix.outSide.lowvers.Count; ++i)
+                //{
+                //    sw.WriteLine("v " + fornix.outSide.getDownver(i).X().ToString() + " "
+                //        + fornix.outSide.getDownver(i).Y().ToString() + " "
+                //        + fornix.outSide.getDownver(i).Z().ToString() + " ");
+                //}
+                for (i = 0; i < fornix.Bessel_num_collected; ++i)
                 {
-                    sw.WriteLine("v " + fornix.outSide.getUpver(i).X().ToString() + " "
-                        + fornix.outSide.getUpver(i).Y().ToString() + " "
-                        + fornix.outSide.getUpver(i).Z().ToString() + " ");
-                }
-                //生成底面外顶点
-                for (i = 0; i < fornix.outSide.lowvers.Count; ++i)
-                {
-                    sw.WriteLine("v " + fornix.outSide.getDownver(i).X().ToString() + " "
-                        + fornix.outSide.getDownver(i).Y().ToString() + " "
-                        + fornix.outSide.getDownver(i).Z().ToString() + " ");
+                    for (j = 0; j < fornix.outSide.sidelines.Count; ++j)
+                    {
+                        sw.WriteLine("v " + fornix.outSide.sidelines[j].getVer(i).X().ToString() + " "
+                            + fornix.outSide.sidelines[j].getVer(i).Y().ToString() + " "
+                            + fornix.outSide.sidelines[j].getVer(i).Z().ToString() + " ");
+                    }
                 }
             }
             sw.WriteLine("\n#内部点");
@@ -76,6 +85,29 @@ namespace FornixModelingGDAL
                         + fornix.downFace.tris.Values[i].points.getVer(1).ID.ToString() + " "
                         + fornix.downFace.tris.Values[i].points.getVer(2).ID.ToString() + " ");
                 }
+            }
+            sw.Close();
+            sw.Dispose();
+        }
+
+        /// <summary>
+        /// 输出边界点角度和曲率
+        /// </summary>
+        /// <param name="fornix"></param>
+        public static void writeAC(Fornix fornix)
+        {
+            StreamWriter sw = File.CreateText(@"E:\Users\LiuXianyu\Documents\ExperimentData\myProject\FornixModelingGDAL\Data\Huangling\Export\" + fornix.name + ".txt");
+            Vertex vertex;
+            for (int i = 0; i < fornix.outSide.upvers.Count; ++i)
+            {
+                vertex = fornix.outSide.getUpver(i);
+                sw.WriteLine((vertex.angle / Math.PI * 180.0).ToString());
+            }
+            sw.WriteLine("");
+            for (int i = 0; i < fornix.outSide.upvers.Count; ++i)
+            {
+                vertex = fornix.outSide.getUpver(i);
+                sw.WriteLine(vertex.curvature.ToString());
             }
             sw.Close();
             sw.Dispose();

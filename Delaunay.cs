@@ -140,6 +140,8 @@ namespace FornixModelingGDAL
             for (; i < vc.Count; ++i)
             {
                 Vertex verInserted = vc.getVer(i);
+                if (verInserted.toRemove)
+                    continue;
                 if (!verInserted.innerPoint)
                 {
                     for (j = 0; j < _tris.Count; ++j)
